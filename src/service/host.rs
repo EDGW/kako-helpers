@@ -72,15 +72,15 @@ define_class!(
         ) {
             let mtm = self.mtm();
             let folders = file_urls(pasteboard);
-            if folders.is_empty() {
-                set_service_error(
-                    error,
-                    "No folders were provided to Remove Localized Names.",
-                );
+
+            if !confirm_remove(mtm) {
                 return;
             }
 
-            if !confirm_remove(mtm, folders.len()) {
+            if folders.is_empty() {
+                let message = "No folders were provided to Remove Localized Names.";
+                set_service_error(error, message);
+                show_error(mtm, "Remove Localized Names", message);
                 return;
             }
 
@@ -186,12 +186,12 @@ fn prompt_for_name(mtm: MainThreadMarker, folder: &Path) -> Option<String> {
 }
 
 #[cfg(target_os = "macos")]
-fn confirm_remove(mtm: MainThreadMarker, folder_count: usize) -> bool {
+fn confirm_remove(mtm: MainThreadMarker) -> bool {
     let alert = NSAlert::new(mtm);
     alert.setMessageText(&NSString::from_str("Remove Localized Names"));
-    alert.setInformativeText(&NSString::from_str(&format!(
-        "Remove all localized names from {folder_count} selected folder(s)?"
-    )));
+    alert.setInformativeText(&NSString::from_str(
+        "Remove all localized names from the selected Finder folders?",
+    ));
     alert.addButtonWithTitle(&NSString::from_str("Remove"));
     alert.addButtonWithTitle(&NSString::from_str("Cancel"));
     alert.runModal() == NSAlertFirstButtonReturn
