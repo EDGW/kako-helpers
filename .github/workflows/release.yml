@@ -1,0 +1,86 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish universal macOS binary
+    runs-on: macos-14
+    env:
+      CARGO_TERM_COLOR: always
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust targets
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      - name: Run tests
+        run: cargo test --locked
+
+      - name: Build arm64 release
+        run: cargo build --locked --release --target aarch64-apple-darwin
+
+      - name: Build x86_64 release
+        run: cargo build --locked --release --target x86_64-apple-darwin
+
+      - name: Create universal release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p dist
+          lipo -create \
+            target/aarch64-apple-darwin/release/kako-helpers \
+            target/x86_64-apple-darwin/release/kako-helpers \
+            -output dist/kako-helpers
+
+          chmod +x dist/kako-helpers
+          codesign --force --sign - dist/kako-helpers
+
+          asset_tag="${GITHUB_REF_NAME//\//-}"
+          asset_name="kako-helpers-${asset_tag}-universal-apple-darwin"
+
+          cp dist/kako-helpers "dist/${asset_name}"
+          tar -C dist -czf "dist/${asset_name}.tar.gz" "${asset_name}"
+
+          cd dist
+          shasum -a 256 "${asset_name}.tar.gz" > "${asset_name}.tar.gz.sha256"
+
+          file kako-helpers
+          lipo -info kako-helpers
+
+      - name: Publish GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          tag="${GITHUB_REF_NAME}"
+          asset_tag="${tag//\//-}"
+          asset_name="kako-helpers-${asset_tag}-universal-apple-darwin"
+          assets=(
+            "dist/${asset_name}"
+            "dist/${asset_name}.tar.gz"
+            "dist/${asset_name}.tar.gz.sha256"
+          )
+
+          if gh release view "${tag}" >/dev/null 2>&1; then
+            gh release upload "${tag}" "${assets[@]}" --clobber
+          else
+            gh release create "${tag}" "${assets[@]}" \
+              --verify-tag \
+              --generate-notes \
+              --title "${tag}"
+          fi
