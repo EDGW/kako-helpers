@@ -229,8 +229,6 @@ pub enum RemoveError {
     },
     #[error("directory is not localized: {}", path.display())]
     NotLocalized { path: PathBuf },
-    #[error("no localization metadata found at {}", path.display())]
-    NoLocalizations { path: PathBuf },
     #[error("language {language:?} is not present in {}", path.display())]
     LanguageNotFound { language: String, path: PathBuf },
     #[error("unmanaged entry in localization metadata: {}", path.display())]
@@ -247,8 +245,6 @@ pub enum RemoveError {
         #[source]
         source: io::Error,
     },
-    #[error("cannot restore localized directory because destination exists: {}", path.display())]
-    RestoreDestinationExists { path: PathBuf },
     #[error("original-name path conflicts with localization removal: {}", path.display())]
     OriginalPathConflict { path: PathBuf },
     #[error("failed to remove original-name symlink {}", path.display())]
@@ -607,50 +603,43 @@ fn remove_localization_impl(
             })
         })?;
     let metadata_dir = normalized.join(".localized");
-    if !metadata_directory_exists(&metadata_dir)? {
-        return Err(
-            LocalizeError::Remove(RemoveError::NoLocalizations { path: normalized }).into(),
-        );
-    }
+    let metadata_exists = metadata_directory_exists(&metadata_dir)?;
 
     let mut managed = Vec::new();
-    for entry in fs::read_dir(&metadata_dir).map_err(|source| {
-        LocalizeError::Remove(RemoveError::ReadDirectory {
-            path: metadata_dir.clone(),
-            source,
-        })
-    })? {
-        let entry = entry.map_err(|source| {
+    if metadata_exists {
+        for entry in fs::read_dir(&metadata_dir).map_err(|source| {
             LocalizeError::Remove(RemoveError::ReadDirectory {
                 path: metadata_dir.clone(),
                 source,
             })
-        })?;
-        let path = entry.path();
-        let file_type = entry.file_type().map_err(|source| {
-            LocalizeError::Remove(RemoveError::ReadDirectory {
-                path: metadata_dir.clone(),
-                source,
-            })
-        })?;
-        if !file_type.is_file()
-            || path.extension().and_then(|value| value.to_str()) != Some("strings")
-        {
-            return Err(LocalizeError::Remove(RemoveError::UnmanagedEntry { path }).into());
+        })? {
+            let entry = entry.map_err(|source| {
+                LocalizeError::Remove(RemoveError::ReadDirectory {
+                    path: metadata_dir.clone(),
+                    source,
+                })
+            })?;
+            let path = entry.path();
+            let file_type = entry.file_type().map_err(|source| {
+                LocalizeError::Remove(RemoveError::ReadDirectory {
+                    path: metadata_dir.clone(),
+                    source,
+                })
+            })?;
+            if !file_type.is_file()
+                || path.extension().and_then(|value| value.to_str()) != Some("strings")
+            {
+                return Err(LocalizeError::Remove(RemoveError::UnmanagedEntry { path }).into());
+            }
+            let language = path
+                .file_stem()
+                .and_then(|value| value.to_str())
+                .ok_or_else(|| {
+                    LocalizeError::Remove(RemoveError::UnmanagedEntry { path: path.clone() })
+                })?
+                .to_owned();
+            managed.push((language, path));
         }
-        let language = path
-            .file_stem()
-            .and_then(|value| value.to_str())
-            .ok_or_else(|| {
-                LocalizeError::Remove(RemoveError::UnmanagedEntry { path: path.clone() })
-            })?
-            .to_owned();
-        managed.push((language, path));
-    }
-    if managed.is_empty() {
-        return Err(
-            LocalizeError::Remove(RemoveError::NoLocalizations { path: normalized }).into(),
-        );
     }
 
     let requested = target_lang
@@ -668,7 +657,7 @@ fn remove_localization_impl(
             files_to_remove.push(path.clone());
         }
     }
-    if removed_languages.is_empty() {
+    if requested.is_some() && removed_languages.is_empty() {
         return Err(LocalizeError::Remove(RemoveError::LanguageNotFound {
             language: requested.unwrap_or_default(),
             path: normalized,
@@ -703,22 +692,26 @@ fn remove_localization_impl(
                 })
             })?;
         }
-        fs::remove_dir(&metadata_dir).map_err(|source| {
-            LocalizeError::Remove(RemoveError::RemoveDirectory {
-                path: metadata_dir.clone(),
-                source,
-            })
-        })?;
+        if metadata_exists {
+            fs::remove_dir(&metadata_dir).map_err(|source| {
+                LocalizeError::Remove(RemoveError::RemoveDirectory {
+                    path: metadata_dir.clone(),
+                    source,
+                })
+            })?;
+        }
         rename_directory_noreplace(&normalized, &restored)
             .map_err(|error| LocalizeError::Remove(RemoveError::Commit(error)))?;
         restored
     } else if remove_all {
-        fs::remove_dir(&metadata_dir).map_err(|source| {
-            LocalizeError::Remove(RemoveError::RemoveDirectory {
-                path: metadata_dir.clone(),
-                source,
-            })
-        })?;
+        if metadata_exists {
+            fs::remove_dir(&metadata_dir).map_err(|source| {
+                LocalizeError::Remove(RemoveError::RemoveDirectory {
+                    path: metadata_dir.clone(),
+                    source,
+                })
+            })?;
+        }
         normalized
     } else {
         normalized
