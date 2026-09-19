@@ -247,6 +247,18 @@ impl OutputStyle {
         );
     }
 
+    pub fn prompt(&self, message: impl Display) -> std::io::Result<()> {
+        let mut stdout = anstream::stdout();
+        write!(
+            stdout,
+            "{}{}{} ",
+            self.highlight,
+            message,
+            self.highlight.render_reset()
+        )?;
+        stdout.flush()
+    }
+
     pub fn skipped(&self, name: &str) {
         let mut stdout = anstream::stdout();
         let _ = writeln!(

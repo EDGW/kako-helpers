@@ -154,9 +154,9 @@ pub fn install_component_services(
     plans: &[ServicePlan],
     source: &Path,
     style: OutputStyle,
-) -> Result<()> {
+) -> Result<usize> {
     if plans.is_empty() {
-        return Ok(());
+        return Ok(0);
     }
 
     let services = services_directory()?;
@@ -169,7 +169,7 @@ pub fn install_component_services(
         install_service(plan, source, style)?;
     }
 
-    Ok(())
+    Ok(plans.len())
 }
 
 fn services_directory() -> Result<PathBuf> {

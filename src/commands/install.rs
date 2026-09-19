@@ -1,5 +1,6 @@
 use std::fs::{self, File};
 use std::io;
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -148,11 +149,54 @@ pub fn run(args: InstallArgs, style: OutputStyle) -> Result<()> {
         style.created_symlink(&name, INSTALLED_BINARY_NAME);
     }
 
-    if !args.no_service {
-        service::install_component_services(&service_plans, &source, style)?;
+    let installed_services = if args.no_service {
+        0
+    } else {
+        service::install_component_services(&service_plans, &source, style)?
+    };
+    if installed_services > 0 {
+        prompt_restart_finder(style)?;
     }
 
     Ok(())
+}
+
+fn prompt_restart_finder(style: OutputStyle) -> Result<()> {
+    if !io::stdin().is_terminal() {
+        return Ok(());
+    }
+
+    style.prompt("Restart Finder now? [y/N]")?;
+    let mut answer = String::new();
+    io::stdin().read_line(&mut answer)?;
+    if answer.trim().eq_ignore_ascii_case("y") {
+        restart_finder()?;
+        style.info("Restarting Finder...");
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn restart_finder() -> Result<()> {
+    use objc2_app_kit::NSRunningApplication;
+    use objc2_foundation::NSString;
+
+    let applications = NSRunningApplication::runningApplicationsWithBundleIdentifier(
+        &NSString::from_str("com.apple.finder"),
+    );
+    if applications
+        .iter()
+        .any(|application| application.terminate())
+    {
+        return Ok(());
+    }
+
+    anyhow::bail!("Finder is not running or could not be terminated")
+}
+
+#[cfg(not(target_os = "macos"))]
+fn restart_finder() -> Result<()> {
+    anyhow::bail!("Finder restart is only supported on macOS")
 }
 
 fn validate_folder(folder: &Path) -> Result<PathBuf> {
