@@ -1,9 +1,10 @@
 # kako-helpers
 
-`kako-helpers` 是 Kako_ 的 macOS 实用工具库和命令行工具。
-目前只实现一个功能：Finder Localized Name 管理。
+[English](./README.md) | 简体中文
 
-Localized Name 用于修改 Finder 中目录的显示名称，不修改目录的真实文件名。
+`kako-helpers` 是 kako_ 的 macOS 实用工具库和命令行工具。
+
+当前实现的功能仅有 Finder Localized Name 管理。
 
 ## 环境要求
 
@@ -18,13 +19,15 @@ cargo build --release
 
 ## Localize
 
+Localized Name 用于修改 Finder 中目录的显示名称，不修改目录的真实文件名。
+
 `localize` 命令管理保存在以下结构中的 Finder 显示名称：
 
 ```text
 Name.localized/
-  .localized/
-    en.strings
-    zh_CN.strings
+ | .localized/
+ |  | en.strings
+ |  | zh_CN.strings
 ```
 
 如果传入路径不以 `.localized` 结尾，程序会先检查原路径，再尝试

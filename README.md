@@ -1,10 +1,10 @@
 # kako-helpers
 
-`kako-helpers` is a macOS utility CLI and helper library for Kako_ tooling.
-It currently provides one feature: Finder Localized Name management.
+English | [简体中文](./README.zh-CN.md)
 
-Localized Names change how Finder displays a directory without changing the
-underlying filesystem name.
+`kako-helpers` is kako_'s macOS utility library and command-line tool.
+
+The only feature currently implemented is Finder Localized Name management.
 
 ## Requirements
 
@@ -19,13 +19,16 @@ cargo build --release
 
 ## Localize
 
+Localized Name changes how Finder displays a directory without changing the
+directory's real filesystem name.
+
 The `localize` command manages Finder display names stored in:
 
 ```text
 Name.localized/
-  .localized/
-    en.strings
-    zh_CN.strings
+ | .localized/
+ |  | en.strings
+ |  | zh_CN.strings
 ```
 
 If the supplied path does not end with `.localized`, `kako-helpers` first
@@ -128,7 +131,8 @@ By default, only the `localize` component is installed:
 <FOLDER>/localize -> kako-helpers
 ```
 
-Use `--components install` to install the `install` symlink instead.
+Using `--components install` can install the `install` component either
+alongside `localize` or on its own.
 
 With `--style prefix`, symlinks are named:
 
@@ -162,4 +166,3 @@ System Settings -> Keyboard -> Keyboard Shortcuts -> Services
 
 After installing or replacing a service, an interactive terminal asks whether
 to restart Finder. Enter `y` to restart it.
-
