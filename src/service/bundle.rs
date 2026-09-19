@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{Context, Result};
+use objc2_app_kit::{NSRunningApplication, NSUpdateDynamicServices};
 use objc2_core_services::LSRegisterURL;
 use objc2_foundation::{
     NSSearchPathDirectory, NSSearchPathDomainMask, NSSearchPathForDirectoriesInDomains, NSString,
@@ -430,7 +431,19 @@ fn register_service(bundle: &Path) -> std::result::Result<(), ServiceError> {
             status: status as i32,
         });
     }
+
+    terminate_running_service_hosts();
+    NSUpdateDynamicServices();
     Ok(())
+}
+
+fn terminate_running_service_hosts() {
+    let applications = NSRunningApplication::runningApplicationsWithBundleIdentifier(
+        &NSString::from_str("com.kako.helpers.localize-service"),
+    );
+    for application in applications.iter() {
+        application.terminate();
+    }
 }
 
 fn info_plist(descriptor: &ServiceDescriptor) -> String {
