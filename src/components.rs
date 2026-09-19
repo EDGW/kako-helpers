@@ -43,8 +43,10 @@ pub struct ServiceDescriptor {
     pub bundle_name: &'static str,
     pub bundle_identifier: &'static str,
     pub host_executable_name: &'static str,
-    pub message: &'static str,
-    pub menu_title: &'static str,
+    pub localize_message: &'static str,
+    pub localize_menu_title: &'static str,
+    pub remove_message: &'static str,
+    pub remove_menu_title: &'static str,
 }
 
 const LOCALIZE_SERVICE: ServiceDescriptor = ServiceDescriptor {
@@ -52,6 +54,8 @@ const LOCALIZE_SERVICE: ServiceDescriptor = ServiceDescriptor {
     bundle_name: "KakoHelpersLocalize.service",
     bundle_identifier: "com.kako.helpers.localize-service",
     host_executable_name: "KakoHelpersLocalizeService",
-    message: "localizeFolder",
-    menu_title: "Localize Folder",
+    localize_message: "localizeFolder",
+    localize_menu_title: "Localize Folder",
+    remove_message: "removeLocalizedNames",
+    remove_menu_title: "Remove Localized Names",
 };

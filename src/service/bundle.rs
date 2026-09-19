@@ -138,7 +138,7 @@ pub fn preflight_component_services(
     for descriptor in descriptors {
         let destination = services.join(descriptor.bundle_name);
         if path_exists(&destination)? && !override_existing {
-            style.service_skipped(descriptor.menu_title);
+            style.service_skipped(descriptor.localize_menu_title);
             continue;
         }
         plans.push(ServicePlan {
@@ -216,10 +216,14 @@ fn install_service(plan: &ServicePlan, source: &Path, style: OutputStyle) -> Res
     if result.is_err() {
         let _ = fs::remove_dir_all(&staging);
     }
-    result
-        .with_context(|| format!("failed to install Finder service {}", descriptor.menu_title))?;
+    result.with_context(|| {
+        format!(
+            "failed to install Finder service {}",
+            descriptor.localize_menu_title
+        )
+    })?;
 
-    style.service_installed(descriptor.menu_title);
+    style.service_installed(descriptor.localize_menu_title);
     Ok(())
 }
 
@@ -232,8 +236,10 @@ fn validate_descriptor(descriptor: &ServiceDescriptor) -> Result<()> {
         || descriptor.bundle_name.is_empty()
         || descriptor.bundle_identifier.is_empty()
         || descriptor.host_executable_name.is_empty()
-        || descriptor.message.is_empty()
-        || descriptor.menu_title.is_empty()
+        || descriptor.localize_message.is_empty()
+        || descriptor.localize_menu_title.is_empty()
+        || descriptor.remove_message.is_empty()
+        || descriptor.remove_menu_title.is_empty()
     {
         return Err(ServiceError::InvalidMetadata {
             component: descriptor.component.command_name(),
@@ -429,6 +435,8 @@ fn info_plist(descriptor: &ServiceDescriptor) -> String {
     INFO_PLIST_TEMPLATE
         .replace("{{HOST}}", descriptor.host_executable_name)
         .replace("{{IDENTIFIER}}", descriptor.bundle_identifier)
-        .replace("{{MESSAGE}}", descriptor.message)
-        .replace("{{MENU}}", descriptor.menu_title)
+        .replace("{{LOCALIZE_MESSAGE}}", descriptor.localize_message)
+        .replace("{{LOCALIZE_MENU}}", descriptor.localize_menu_title)
+        .replace("{{REMOVE_MESSAGE}}", descriptor.remove_message)
+        .replace("{{REMOVE_MENU}}", descriptor.remove_menu_title)
 }

@@ -61,6 +61,42 @@ define_class!(
                 show_error(mtm, "Localize Folder", &message);
             }
         }
+
+        // SAFETY: This matches the selector expected by NSServices.
+        #[unsafe(method(removeLocalizedNames:userData:error:))]
+        fn remove_localized_names(
+            &self,
+            pasteboard: &NSPasteboard,
+            _user_data: Option<&NSString>,
+            error: *mut *mut NSString,
+        ) {
+            let mtm = self.mtm();
+            let folders = file_urls(pasteboard);
+            if folders.is_empty() {
+                set_service_error(
+                    error,
+                    "No folders were provided to Remove Localized Names.",
+                );
+                return;
+            }
+
+            if !confirm_remove(mtm, folders.len()) {
+                return;
+            }
+
+            let mut failures = Vec::new();
+            for folder in folders {
+                if let Err(error) = crate::tools::localizer::remove_localization(&folder, None) {
+                    failures.push(format!("{}: {error:#}", folder.display()));
+                }
+            }
+
+            if !failures.is_empty() {
+                let message = failures.join("\n");
+                set_service_error(error, &message);
+                show_error(mtm, "Remove Localized Names", &message);
+            }
+        }
     }
 );
 
@@ -147,6 +183,18 @@ fn prompt_for_name(mtm: MainThreadMarker, folder: &Path) -> Option<String> {
 
         show_error(mtm, "Localize Folder", "The display name cannot be empty.");
     }
+}
+
+#[cfg(target_os = "macos")]
+fn confirm_remove(mtm: MainThreadMarker, folder_count: usize) -> bool {
+    let alert = NSAlert::new(mtm);
+    alert.setMessageText(&NSString::from_str("Remove Localized Names"));
+    alert.setInformativeText(&NSString::from_str(&format!(
+        "Remove all localized names from {folder_count} selected folder(s)?"
+    )));
+    alert.addButtonWithTitle(&NSString::from_str("Remove"));
+    alert.addButtonWithTitle(&NSString::from_str("Cancel"));
+    alert.runModal() == NSAlertFirstButtonReturn
 }
 
 #[cfg(target_os = "macos")]
