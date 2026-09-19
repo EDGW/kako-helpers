@@ -39,6 +39,10 @@ pub struct SetArgs {
     #[arg(short, long)]
     silent: bool,
 
+    /// Create a symlink at the original name pointing to the localized folder.
+    #[arg(short = 'C', long)]
+    create_symlink: bool,
+
     /// Require the path to match exactly; do not try path.localized.
     #[arg(short = 'S', long)]
     strict: bool,
@@ -56,6 +60,10 @@ pub struct RemoveArgs {
     /// Suppress success output.
     #[arg(short, long)]
     silent: bool,
+
+    /// Keep the localized directory name instead of renaming it back.
+    #[arg(short = 'N', long)]
+    no_rename: bool,
 
     /// Require the path to match exactly; do not try path.localized.
     #[arg(short = 'S', long)]
@@ -92,8 +100,15 @@ pub fn run(args: LocalizeArgs, style: OutputStyle) -> Result<()> {
 
 fn run_set(args: SetArgs, style: OutputStyle) -> Result<()> {
     let path = resolve_path(args.path, args.strict);
-    let localized = localizer::localize(&path, args.lang.as_deref(), &args.name)
-        .with_context(|| format!("localize set failed for {}", path.display()))?;
+    let localized = localizer::localize_with_options(
+        &path,
+        args.lang.as_deref(),
+        &args.name,
+        localizer::LocalizeOptions {
+            create_symlink: args.create_symlink,
+        },
+    )
+    .with_context(|| format!("localize set failed for {}", path.display()))?;
 
     style.set_localized_name(args.silent, &localized, &args.name);
     Ok(())
@@ -101,8 +116,14 @@ fn run_set(args: SetArgs, style: OutputStyle) -> Result<()> {
 
 fn run_remove(args: RemoveArgs, style: OutputStyle) -> Result<()> {
     let path = resolve_path(args.path, args.strict);
-    let report = localizer::remove_localization(&path, args.lang.as_deref())
-        .with_context(|| format!("localize remove failed for {}", path.display()))?;
+    let report = localizer::remove_localization_with_options(
+        &path,
+        args.lang.as_deref(),
+        localizer::RemoveOptions {
+            no_rename: args.no_rename,
+        },
+    )
+    .with_context(|| format!("localize remove failed for {}", path.display()))?;
 
     match args.lang {
         Some(language) => style.removed_language(args.silent, &language, &report.path),

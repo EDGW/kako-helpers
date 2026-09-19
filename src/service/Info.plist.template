@@ -16,46 +16,7 @@
   <string>NSApplication</string>
   <key>NSServices</key>
   <array>
-    <dict>
-      <key>NSMessage</key>
-      <string>{{LOCALIZE_MESSAGE}}</string>
-      <key>NSMenuItem</key>
-      <dict>
-        <key>default</key>
-        <string>{{LOCALIZE_MENU}}</string>
-      </dict>
-      <key>NSPortName</key>
-      <string>{{HOST}}</string>
-      <key>NSSendFileTypes</key>
-      <array>
-        <string>public.folder</string>
-      </array>
-      <key>NSRequiredContext</key>
-      <dict>
-        <key>NSApplicationIdentifier</key>
-        <string>com.apple.finder</string>
-      </dict>
-    </dict>
-    <dict>
-      <key>NSMessage</key>
-      <string>{{REMOVE_MESSAGE}}</string>
-      <key>NSMenuItem</key>
-      <dict>
-        <key>default</key>
-        <string>{{REMOVE_MENU}}</string>
-      </dict>
-      <key>NSPortName</key>
-      <string>{{HOST}}</string>
-      <key>NSSendFileTypes</key>
-      <array>
-        <string>public.folder</string>
-      </array>
-      <key>NSRequiredContext</key>
-      <dict>
-        <key>NSApplicationIdentifier</key>
-        <string>com.apple.finder</string>
-      </dict>
-    </dict>
+{{SERVICE_ITEMS}}
   </array>
 </dict>
 </plist>

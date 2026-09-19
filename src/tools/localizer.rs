@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use anyhow::{Context, Result};
 use thiserror::Error;
 
-use crate::components::{Component, ServiceDescriptor};
+use crate::components::{Component, ServiceActionDescriptor, ServiceDescriptor};
 
 const LOCALIZED_SUFFIX: &str = ".localized";
 static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -16,11 +16,27 @@ pub(crate) const LOCALIZE_SERVICE: ServiceDescriptor = ServiceDescriptor {
     bundle_name: "KakoHelpersLocalize.service",
     bundle_identifier: "com.kako.helpers.localize-service",
     host_executable_name: "KakoHelpersLocalizeService",
-    localize_message: "localizeFolder",
-    localize_menu_title: "Localize Folder",
-    remove_message: "removeLocalizedNames",
-    remove_menu_title: "Remove Localized Names",
+    actions: &LOCALIZE_ACTIONS,
 };
+
+const LOCALIZE_ACTIONS: [ServiceActionDescriptor; 4] = [
+    ServiceActionDescriptor {
+        message: "localizeFolder",
+        menu_title: "Localizer: Localize Folder",
+    },
+    ServiceActionDescriptor {
+        message: "localizeFolderWithSymlink",
+        menu_title: "Localizer: Localize Folder with Symlink",
+    },
+    ServiceActionDescriptor {
+        message: "removeLocalizedNames",
+        menu_title: "Localizer: Remove Localized Names",
+    },
+    ServiceActionDescriptor {
+        message: "removeLocalizedNamesWithoutRename",
+        menu_title: "Localizer: Remove Localized Names without Rename",
+    },
+];
 
 #[derive(Debug)]
 pub struct Localizer;
@@ -127,6 +143,20 @@ pub enum TargetError {
     MissingFileName { path: PathBuf },
     #[error("target directory name is not valid UTF-8: {}", path.display())]
     NonUtf8FileName { path: PathBuf },
+    #[error("original-name path conflicts with localization symlink: {}", path.display())]
+    OriginalSymlinkConflict { path: PathBuf },
+    #[error("failed to create original-name symlink {}", path.display())]
+    CreateOriginalSymlink {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+    #[error("failed to remove original-name symlink {}", path.display())]
+    RemoveOriginalSymlink {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
 }
 
 /// Failures while creating and atomically replacing `.localized` metadata.
@@ -219,6 +249,14 @@ pub enum RemoveError {
     },
     #[error("cannot restore localized directory because destination exists: {}", path.display())]
     RestoreDestinationExists { path: PathBuf },
+    #[error("original-name path conflicts with localization removal: {}", path.display())]
+    OriginalPathConflict { path: PathBuf },
+    #[error("failed to remove original-name symlink {}", path.display())]
+    RemoveOriginalSymlink {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
     #[error(transparent)]
     Commit(#[from] CommitError),
 }
@@ -276,6 +314,18 @@ pub struct RemoveReport {
     pub removed_languages: Vec<String>,
 }
 
+/// Options for creating a localized directory name.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct LocalizeOptions {
+    pub create_symlink: bool,
+}
+
+/// Options for removing localized directory names.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RemoveOptions {
+    pub no_rename: bool,
+}
+
 /// Returns the first preferred macOS language normalized for `.strings` files.
 ///
 /// The value comes from `NSLocale.preferredLanguages`, not the process `LANG`
@@ -317,11 +367,26 @@ pub fn current_lang() -> Result<Box<str>> {
 /// Returns an [`anyhow::Error`] whose chain contains a [`LocalizeError`] grouped
 /// by language, display-name, target, metadata, or commit failure.
 pub fn localize(dir: &Path, target_lang: Option<&str>, new_name: &str) -> Result<PathBuf> {
-    localize_impl(dir, target_lang, new_name)
+    localize_with_options(dir, target_lang, new_name, LocalizeOptions::default())
+}
+
+/// Creates or updates a localized directory name with explicit options.
+pub fn localize_with_options(
+    dir: &Path,
+    target_lang: Option<&str>,
+    new_name: &str,
+    options: LocalizeOptions,
+) -> Result<PathBuf> {
+    localize_impl(dir, target_lang, new_name, options)
         .with_context(|| format!("failed to localize directory {}", dir.display()))
 }
 
-fn localize_impl(dir: &Path, target_lang: Option<&str>, new_name: &str) -> Result<PathBuf> {
+fn localize_impl(
+    dir: &Path,
+    target_lang: Option<&str>,
+    new_name: &str,
+    options: LocalizeOptions,
+) -> Result<PathBuf> {
     let normalized_dir = normalized_directory(dir)?;
     let dir = normalized_dir.as_path();
     validate_display_name(new_name).map_err(LocalizeError::DisplayName)?;
@@ -351,6 +416,7 @@ fn localize_impl(dir: &Path, target_lang: Option<&str>, new_name: &str) -> Resul
     } else {
         dir.with_file_name(format!("{dir_name}{LOCALIZED_SUFFIX}"))
     };
+    let original_path = dir.with_file_name(source_name);
     if destination != dir {
         match fs::symlink_metadata(&destination) {
             Ok(_) => {
@@ -378,7 +444,125 @@ fn localize_impl(dir: &Path, target_lang: Option<&str>, new_name: &str) -> Resul
         rename_directory_noreplace(dir, &destination)?;
     }
 
+    if options.create_symlink
+        && let Err(error) = ensure_original_symlink(&original_path, &destination)
+    {
+        if destination != dir {
+            let _ = rename_directory_noreplace(&destination, dir);
+        }
+        return Err(error.into());
+    }
+
     Ok(destination)
+}
+
+fn ensure_original_symlink(
+    original: &Path,
+    destination: &Path,
+) -> std::result::Result<(), LocalizeError> {
+    match fs::symlink_metadata(original) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            if paths_resolve_equal(original, destination) {
+                return Ok(());
+            }
+            return Err(LocalizeError::Target(
+                TargetError::OriginalSymlinkConflict {
+                    path: original.to_owned(),
+                },
+            ));
+        }
+        Ok(_) => {
+            return Err(LocalizeError::Target(
+                TargetError::OriginalSymlinkConflict {
+                    path: original.to_owned(),
+                },
+            ));
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(source) => {
+            return Err(LocalizeError::Target(TargetError::Inspect {
+                path: original.to_owned(),
+                source,
+            }));
+        }
+    }
+
+    let target = destination.file_name().ok_or_else(|| {
+        LocalizeError::Target(TargetError::MissingFileName {
+            path: destination.to_owned(),
+        })
+    })?;
+    create_relative_symlink(target, original).map_err(|source| {
+        LocalizeError::Target(TargetError::CreateOriginalSymlink {
+            path: original.to_owned(),
+            source,
+        })
+    })
+}
+
+fn paths_resolve_equal(left: &Path, right: &Path) -> bool {
+    match (fs::canonicalize(left), fs::canonicalize(right)) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => false,
+    }
+}
+
+fn validate_original_path_for_remove(
+    original: &Path,
+    localized: &Path,
+) -> std::result::Result<Option<PathBuf>, LocalizeError> {
+    match fs::symlink_metadata(original) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            if paths_resolve_equal(original, localized) {
+                Ok(Some(original.to_owned()))
+            } else {
+                Err(LocalizeError::Remove(RemoveError::OriginalPathConflict {
+                    path: original.to_owned(),
+                }))
+            }
+        }
+        Ok(_) => Err(LocalizeError::Remove(RemoveError::OriginalPathConflict {
+            path: original.to_owned(),
+        })),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(source) => Err(LocalizeError::Target(TargetError::Inspect {
+            path: original.to_owned(),
+            source,
+        })),
+    }
+}
+
+fn resolve_localized_symlink(path: &Path) -> std::result::Result<PathBuf, LocalizeError> {
+    let normalized: PathBuf = path.components().collect();
+    match fs::symlink_metadata(&normalized) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            fs::canonicalize(&normalized).map_err(|source| {
+                LocalizeError::Target(TargetError::Inspect {
+                    path: normalized,
+                    source,
+                })
+            })
+        }
+        Ok(_) => Ok(normalized),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(normalized),
+        Err(source) => Err(LocalizeError::Target(TargetError::Inspect {
+            path: normalized,
+            source,
+        })),
+    }
+}
+
+#[cfg(unix)]
+fn create_relative_symlink(target: &std::ffi::OsStr, path: &Path) -> io::Result<()> {
+    std::os::unix::fs::symlink(Path::new(target), path)
+}
+
+#[cfg(not(unix))]
+fn create_relative_symlink(_target: &std::ffi::OsStr, _path: &Path) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "symlinks are unsupported",
+    ))
 }
 
 /// Removes one or all localized names from a `.localized` directory.
@@ -386,12 +570,26 @@ fn localize_impl(dir: &Path, target_lang: Option<&str>, new_name: &str) -> Resul
 /// When the last localization is removed, the directory is restored to its
 /// unlocalized name using a no-replace rename.
 pub fn remove_localization(dir: &Path, target_lang: Option<&str>) -> Result<RemoveReport> {
-    remove_localization_impl(dir, target_lang)
+    remove_localization_with_options(dir, target_lang, RemoveOptions::default())
+}
+
+/// Removes one or all localized names with explicit options.
+pub fn remove_localization_with_options(
+    dir: &Path,
+    target_lang: Option<&str>,
+    options: RemoveOptions,
+) -> Result<RemoveReport> {
+    remove_localization_impl(dir, target_lang, options)
         .with_context(|| format!("failed to remove localized names from {}", dir.display()))
 }
 
-fn remove_localization_impl(dir: &Path, target_lang: Option<&str>) -> Result<RemoveReport> {
-    let normalized = normalized_directory(dir)?;
+fn remove_localization_impl(
+    dir: &Path,
+    target_lang: Option<&str>,
+    options: RemoveOptions,
+) -> Result<RemoveReport> {
+    let resolved = resolve_localized_symlink(dir)?;
+    let normalized = normalized_directory(&resolved)?;
     let dir_name = normalized
         .file_name()
         .and_then(|name| name.to_str())
@@ -478,24 +676,11 @@ fn remove_localization_impl(dir: &Path, target_lang: Option<&str>) -> Result<Rem
         .into());
     }
 
-    let restore_to = if files_to_remove.len() == managed.len() {
-        let restored = normalized.with_file_name(source_name);
-        match fs::symlink_metadata(&restored) {
-            Ok(_) => {
-                return Err(
-                    LocalizeError::Remove(RemoveError::RestoreDestinationExists { path: restored })
-                        .into(),
-                );
-            }
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Some(restored),
-            Err(source) => {
-                return Err(LocalizeError::Target(TargetError::InspectDestination {
-                    path: restored,
-                    source,
-                })
-                .into());
-            }
-        }
+    let original = normalized.with_file_name(source_name);
+    let original_symlink = validate_original_path_for_remove(&original, &normalized)?;
+    let remove_all = files_to_remove.len() == managed.len();
+    let restore_to = if remove_all && !options.no_rename {
+        Some(original.clone())
     } else {
         None
     };
@@ -510,6 +695,14 @@ fn remove_localization_impl(dir: &Path, target_lang: Option<&str>) -> Result<Rem
     }
 
     let final_path = if let Some(restored) = restore_to {
+        if original_symlink.is_some() {
+            fs::remove_file(&original).map_err(|source| {
+                LocalizeError::Remove(RemoveError::RemoveOriginalSymlink {
+                    path: original.clone(),
+                    source,
+                })
+            })?;
+        }
         fs::remove_dir(&metadata_dir).map_err(|source| {
             LocalizeError::Remove(RemoveError::RemoveDirectory {
                 path: metadata_dir.clone(),
@@ -519,6 +712,14 @@ fn remove_localization_impl(dir: &Path, target_lang: Option<&str>) -> Result<Rem
         rename_directory_noreplace(&normalized, &restored)
             .map_err(|error| LocalizeError::Remove(RemoveError::Commit(error)))?;
         restored
+    } else if remove_all {
+        fs::remove_dir(&metadata_dir).map_err(|source| {
+            LocalizeError::Remove(RemoveError::RemoveDirectory {
+                path: metadata_dir.clone(),
+                source,
+            })
+        })?;
+        normalized
     } else {
         normalized
     };

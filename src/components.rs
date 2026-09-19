@@ -42,8 +42,11 @@ pub struct ServiceDescriptor {
     pub bundle_name: &'static str,
     pub bundle_identifier: &'static str,
     pub host_executable_name: &'static str,
-    pub localize_message: &'static str,
-    pub localize_menu_title: &'static str,
-    pub remove_message: &'static str,
-    pub remove_menu_title: &'static str,
+    pub actions: &'static [ServiceActionDescriptor],
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ServiceActionDescriptor {
+    pub message: &'static str,
+    pub menu_title: &'static str,
 }

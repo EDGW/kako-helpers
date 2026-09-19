@@ -37,29 +37,30 @@ define_class!(
             _user_data: Option<&NSString>,
             error: *mut *mut NSString,
         ) {
-            let mtm = self.mtm();
-            let folders = file_urls(pasteboard);
-            let mut failures = Vec::new();
+            handle_localize(
+                self.mtm(),
+                pasteboard,
+                error,
+                false,
+                "Localizer: Localize Folder",
+            );
+        }
 
-            if folders.is_empty() {
-                set_service_error(error, "No folders were provided to Localize Folder.");
-                return;
-            }
-
-            for folder in folders {
-                let Some(name) = prompt_for_name(mtm, &folder) else {
-                    continue;
-                };
-                if let Err(error) = crate::tools::localizer::localize(&folder, None, &name) {
-                    failures.push(format!("{}: {error:#}", folder.display()));
-                }
-            }
-
-            if !failures.is_empty() {
-                let message = failures.join("\n");
-                set_service_error(error, &message);
-                show_error(mtm, "Localize Folder", &message);
-            }
+        // SAFETY: This matches the selector expected by NSServices.
+        #[unsafe(method(localizeFolderWithSymlink:userData:error:))]
+        fn localize_folder_with_symlink(
+            &self,
+            pasteboard: &NSPasteboard,
+            _user_data: Option<&NSString>,
+            error: *mut *mut NSString,
+        ) {
+            handle_localize(
+                self.mtm(),
+                pasteboard,
+                error,
+                true,
+                "Localizer: Localize Folder with Symlink",
+            );
         }
 
         // SAFETY: This matches the selector expected by NSServices.
@@ -70,32 +71,30 @@ define_class!(
             _user_data: Option<&NSString>,
             error: *mut *mut NSString,
         ) {
-            let mtm = self.mtm();
-            let folders = file_urls(pasteboard);
+            handle_remove(
+                self.mtm(),
+                pasteboard,
+                error,
+                false,
+                "Localizer: Remove Localized Names",
+            );
+        }
 
-            if !confirm_remove(mtm) {
-                return;
-            }
-
-            if folders.is_empty() {
-                let message = "No folders were provided to Remove Localized Names.";
-                set_service_error(error, message);
-                show_error(mtm, "Remove Localized Names", message);
-                return;
-            }
-
-            let mut failures = Vec::new();
-            for folder in folders {
-                if let Err(error) = crate::tools::localizer::remove_localization(&folder, None) {
-                    failures.push(format!("{}: {error:#}", folder.display()));
-                }
-            }
-
-            if !failures.is_empty() {
-                let message = failures.join("\n");
-                set_service_error(error, &message);
-                show_error(mtm, "Remove Localized Names", &message);
-            }
+        // SAFETY: This matches the selector expected by NSServices.
+        #[unsafe(method(removeLocalizedNamesWithoutRename:userData:error:))]
+        fn remove_localized_names_without_rename(
+            &self,
+            pasteboard: &NSPasteboard,
+            _user_data: Option<&NSString>,
+            error: *mut *mut NSString,
+        ) {
+            handle_remove(
+                self.mtm(),
+                pasteboard,
+                error,
+                true,
+                "Localizer: Remove Localized Names without Rename",
+            );
         }
     }
 );
@@ -155,6 +154,84 @@ fn file_urls(pasteboard: &NSPasteboard) -> Vec<PathBuf> {
 }
 
 #[cfg(target_os = "macos")]
+fn handle_localize(
+    mtm: MainThreadMarker,
+    pasteboard: &NSPasteboard,
+    error: *mut *mut NSString,
+    create_symlink: bool,
+    title: &str,
+) {
+    activate_ui(mtm);
+    let folders = file_urls(pasteboard);
+    if folders.is_empty() {
+        let message = format!("No folders were provided to {title}.");
+        set_service_error(error, &message);
+        show_error(mtm, title, &message);
+        return;
+    }
+
+    let mut failures = Vec::new();
+    for folder in folders {
+        let Some(name) = prompt_for_name(mtm, &folder) else {
+            continue;
+        };
+        if let Err(error) = crate::tools::localizer::localize_with_options(
+            &folder,
+            None,
+            &name,
+            crate::tools::localizer::LocalizeOptions { create_symlink },
+        ) {
+            failures.push(format!("{}: {error:#}", folder.display()));
+        }
+    }
+
+    if !failures.is_empty() {
+        let message = failures.join("\n");
+        set_service_error(error, &message);
+        show_error(mtm, title, &message);
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn handle_remove(
+    mtm: MainThreadMarker,
+    pasteboard: &NSPasteboard,
+    error: *mut *mut NSString,
+    no_rename: bool,
+    title: &str,
+) {
+    activate_ui(mtm);
+    let folders = file_urls(pasteboard);
+
+    if !confirm_remove(mtm, title) {
+        return;
+    }
+    if folders.is_empty() {
+        let message = format!("No folders were provided to {title}.");
+        set_service_error(error, &message);
+        show_error(mtm, title, &message);
+        return;
+    }
+
+    let mut failures = Vec::new();
+    for folder in folders {
+        if let Err(error) = crate::tools::localizer::remove_localization_with_options(
+            &folder,
+            None,
+            crate::tools::localizer::RemoveOptions { no_rename },
+        ) {
+            failures.push(format!("{}: {error:#}", folder.display()));
+        }
+    }
+
+    if !failures.is_empty() {
+        let message = failures.join("\n");
+        set_service_error(error, &message);
+        show_error(mtm, title, &message);
+    }
+}
+
+#[cfg(target_os = "macos")]
 fn prompt_for_name(mtm: MainThreadMarker, folder: &Path) -> Option<String> {
     loop {
         let alert = NSAlert::new(mtm);
@@ -186,9 +263,9 @@ fn prompt_for_name(mtm: MainThreadMarker, folder: &Path) -> Option<String> {
 }
 
 #[cfg(target_os = "macos")]
-fn confirm_remove(mtm: MainThreadMarker) -> bool {
+fn confirm_remove(mtm: MainThreadMarker, title: &str) -> bool {
     let alert = NSAlert::new(mtm);
-    alert.setMessageText(&NSString::from_str("Remove Localized Names"));
+    alert.setMessageText(&NSString::from_str(title));
     alert.setInformativeText(&NSString::from_str(
         "Remove all localized names from the selected Finder folders?",
     ));
@@ -204,6 +281,13 @@ fn show_error(mtm: MainThreadMarker, title: &str, message: &str) {
     alert.setInformativeText(&NSString::from_str(message));
     alert.addButtonWithTitle(&NSString::from_str("OK"));
     alert.runModal();
+}
+
+#[cfg(target_os = "macos")]
+fn activate_ui(mtm: MainThreadMarker) {
+    let app = NSApplication::sharedApplication(mtm);
+    #[allow(deprecated)]
+    app.activateIgnoringOtherApps(true);
 }
 
 #[cfg(target_os = "macos")]

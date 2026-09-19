@@ -16,6 +16,7 @@ use crate::output::OutputStyle;
 
 const SERVICES_DIRECTORY: &str = "Services";
 const INFO_PLIST_TEMPLATE: &str = include_str!("Info.plist.template");
+const SERVICE_ITEM_TEMPLATE: &str = include_str!("ServiceItem.plist.template");
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Error)]
@@ -138,7 +139,7 @@ pub fn preflight_component_services(
     for descriptor in descriptors {
         let destination = services.join(descriptor.bundle_name);
         if path_exists(&destination)? && !override_existing {
-            style.service_skipped(descriptor.localize_menu_title);
+            style.service_skipped(descriptor.component.command_name());
             continue;
         }
         plans.push(ServicePlan {
@@ -219,11 +220,11 @@ fn install_service(plan: &ServicePlan, source: &Path, style: OutputStyle) -> Res
     result.with_context(|| {
         format!(
             "failed to install Finder service {}",
-            descriptor.localize_menu_title
+            descriptor.component.command_name()
         )
     })?;
 
-    style.service_installed(descriptor.localize_menu_title);
+    style.service_installed(descriptor.component.command_name());
     Ok(())
 }
 
@@ -236,10 +237,11 @@ fn validate_descriptor(descriptor: &ServiceDescriptor) -> Result<()> {
         || descriptor.bundle_name.is_empty()
         || descriptor.bundle_identifier.is_empty()
         || descriptor.host_executable_name.is_empty()
-        || descriptor.localize_message.is_empty()
-        || descriptor.localize_menu_title.is_empty()
-        || descriptor.remove_message.is_empty()
-        || descriptor.remove_menu_title.is_empty()
+        || descriptor.actions.is_empty()
+        || descriptor
+            .actions
+            .iter()
+            .any(|action| action.message.is_empty() || action.menu_title.is_empty())
     {
         return Err(ServiceError::InvalidMetadata {
             component: descriptor.component.command_name(),
@@ -432,11 +434,19 @@ fn register_service(bundle: &Path) -> std::result::Result<(), ServiceError> {
 }
 
 fn info_plist(descriptor: &ServiceDescriptor) -> String {
+    let service_items = descriptor
+        .actions
+        .iter()
+        .map(|action| {
+            SERVICE_ITEM_TEMPLATE
+                .replace("{{MESSAGE}}", action.message)
+                .replace("{{MENU}}", action.menu_title)
+                .replace("{{HOST}}", descriptor.host_executable_name)
+        })
+        .collect::<String>();
+
     INFO_PLIST_TEMPLATE
         .replace("{{HOST}}", descriptor.host_executable_name)
         .replace("{{IDENTIFIER}}", descriptor.bundle_identifier)
-        .replace("{{LOCALIZE_MESSAGE}}", descriptor.localize_message)
-        .replace("{{LOCALIZE_MENU}}", descriptor.localize_menu_title)
-        .replace("{{REMOVE_MESSAGE}}", descriptor.remove_message)
-        .replace("{{REMOVE_MENU}}", descriptor.remove_menu_title)
+        .replace("{{SERVICE_ITEMS}}", &service_items)
 }
