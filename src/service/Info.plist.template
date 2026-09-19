@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleExecutable</key>
+  <string>{{HOST}}</string>
+  <key>CFBundleIdentifier</key>
+  <string>{{IDENTIFIER}}</string>
+  <key>CFBundleName</key>
+  <string>Kako Helpers Localize</string>
+  <key>LSUIElement</key>
+  <true/>
+  <key>NSPrincipalClass</key>
+  <string>NSApplication</string>
+  <key>NSServices</key>
+  <array>
+    <dict>
+      <key>NSMessage</key>
+      <string>{{MESSAGE}}</string>
+      <key>NSMenuItem</key>
+      <dict>
+        <key>default</key>
+        <string>{{MENU}}</string>
+      </dict>
+      <key>NSPortName</key>
+      <string>{{HOST}}</string>
+      <key>NSSendFileTypes</key>
+      <array>
+        <string>public.folder</string>
+      </array>
+      <key>NSRequiredContext</key>
+      <dict>
+        <key>NSApplicationIdentifier</key>
+        <string>com.apple.finder</string>
+      </dict>
+    </dict>
+  </array>
+</dict>
+</plist>

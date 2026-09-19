@@ -1,23 +1,27 @@
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{Context, Result};
+use objc2_core_services::LSRegisterURL;
+use objc2_foundation::{
+    NSSearchPathDirectory, NSSearchPathDomainMask, NSSearchPathForDirectoriesInDomains, NSString,
+    NSURL,
+};
 use thiserror::Error;
 
 use crate::components::{Component, ServiceDescriptor};
 use crate::output::OutputStyle;
 
-const SERVICES_DIRECTORY: &str = "Library/Services";
-const LSREGISTER: &str = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
+const SERVICES_DIRECTORY: &str = "Services";
+const INFO_PLIST_TEMPLATE: &str = include_str!("Info.plist.template");
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Error)]
 enum ServiceError {
-    #[error("HOME is not set")]
-    HomeMissing,
+    #[error("macOS did not return a user Library directory")]
+    LibraryDirectoryUnavailable,
     #[error("failed to inspect service path {}", path.display())]
     Inspect {
         path: PathBuf,
@@ -76,13 +80,6 @@ enum ServiceError {
     #[error("failed to remove previous service bundle {}", path.display())]
     RemoveBackup {
         path: PathBuf,
-        #[source]
-        source: io::Error,
-    },
-    #[error("failed to register service {} with Launch Services", bundle.display())]
-    Register {
-        bundle: PathBuf,
-        status: Option<i32>,
         #[source]
         source: io::Error,
     },
@@ -175,8 +172,15 @@ pub fn install_component_services(
 }
 
 fn services_directory() -> Result<PathBuf> {
-    let home = std::env::var_os("HOME").ok_or(ServiceError::HomeMissing)?;
-    Ok(PathBuf::from(home).join(SERVICES_DIRECTORY))
+    let paths = NSSearchPathForDirectoriesInDomains(
+        NSSearchPathDirectory::LibraryDirectory,
+        NSSearchPathDomainMask::UserDomainMask,
+        true,
+    );
+    let library = paths
+        .firstObject()
+        .ok_or(ServiceError::LibraryDirectoryUnavailable)?;
+    Ok(PathBuf::from(library.to_string()).join(SERVICES_DIRECTORY))
 }
 
 fn install_service(plan: &ServicePlan, source: &Path, style: OutputStyle) -> Result<()> {
@@ -409,71 +413,22 @@ fn rename_no_replace(from: &Path, to: &Path) -> io::Result<()> {
 }
 
 fn register_service(bundle: &Path) -> std::result::Result<(), ServiceError> {
-    let status = Command::new(LSREGISTER)
-        .arg("-f")
-        .arg(bundle)
-        .status()
-        .map_err(|source| ServiceError::Register {
-            bundle: bundle.to_owned(),
-            status: None,
-            source,
-        })?;
-    if !status.success() {
+    let url = NSURL::fileURLWithPath(&NSString::from_str(&bundle.to_string_lossy()));
+    // SAFETY: LSRegisterURL accepts a valid file URL and does not retain it.
+    let status = unsafe { LSRegisterURL(url.as_ref(), true) };
+    if status != 0 {
         return Err(ServiceError::RegisterStatus {
             bundle: bundle.to_owned(),
-            status: status.code().unwrap_or(-1),
+            status: status as i32,
         });
     }
     Ok(())
 }
 
 fn info_plist(descriptor: &ServiceDescriptor) -> String {
-    format!(
-        r#"<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>CFBundlePackageType</key>
-  <string>APPL</string>
-  <key>CFBundleExecutable</key>
-  <string>{host}</string>
-  <key>CFBundleIdentifier</key>
-  <string>{identifier}</string>
-  <key>CFBundleName</key>
-  <string>Kako Helpers Localize</string>
-  <key>LSUIElement</key>
-  <true/>
-  <key>NSPrincipalClass</key>
-  <string>NSApplication</string>
-  <key>NSServices</key>
-  <array>
-    <dict>
-      <key>NSMessage</key>
-      <string>{message}</string>
-      <key>NSMenuItem</key>
-      <dict>
-        <key>default</key>
-        <string>{menu}</string>
-      </dict>
-      <key>NSPortName</key>
-      <string>{host}</string>
-      <key>NSSendFileTypes</key>
-      <array>
-        <string>public.folder</string>
-      </array>
-      <key>NSRequiredContext</key>
-      <dict>
-        <key>NSApplicationIdentifier</key>
-        <string>com.apple.finder</string>
-      </dict>
-    </dict>
-  </array>
-</dict>
-</plist>
-"#,
-        host = descriptor.host_executable_name,
-        identifier = descriptor.bundle_identifier,
-        message = descriptor.message,
-        menu = descriptor.menu_title,
-    )
+    INFO_PLIST_TEMPLATE
+        .replace("{{HOST}}", descriptor.host_executable_name)
+        .replace("{{IDENTIFIER}}", descriptor.bundle_identifier)
+        .replace("{{MESSAGE}}", descriptor.message)
+        .replace("{{MENU}}", descriptor.menu_title)
 }
