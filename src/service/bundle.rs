@@ -103,7 +103,7 @@ pub struct ServicePlan {
 }
 
 pub fn preflight_component_services(
-    components: &[Component],
+    components: &[&'static dyn Component],
     override_existing: bool,
     style: OutputStyle,
 ) -> Result<Vec<ServicePlan>> {

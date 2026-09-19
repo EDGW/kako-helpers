@@ -12,7 +12,7 @@ const LOCALIZED_SUFFIX: &str = ".localized";
 static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) const LOCALIZE_SERVICE: ServiceDescriptor = ServiceDescriptor {
-    component: Component::Localize,
+    component: &LOCALIZER,
     bundle_name: "KakoHelpersLocalize.service",
     bundle_identifier: "com.kako.helpers.localize-service",
     host_executable_name: "KakoHelpersLocalizeService",
@@ -21,6 +21,21 @@ pub(crate) const LOCALIZE_SERVICE: ServiceDescriptor = ServiceDescriptor {
     remove_message: "removeLocalizedNames",
     remove_menu_title: "Remove Localized Names",
 };
+
+#[derive(Debug)]
+pub struct Localizer;
+
+pub static LOCALIZER: Localizer = Localizer;
+
+impl Component for Localizer {
+    fn command_name(&self) -> &'static str {
+        "localize"
+    }
+
+    fn service_descriptor(&self) -> Option<&'static ServiceDescriptor> {
+        Some(&LOCALIZE_SERVICE)
+    }
+}
 
 /// Top-level failure returned by the localized-name API.
 ///

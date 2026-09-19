@@ -7,7 +7,7 @@ use anyhow::Result;
 use clap::{Args, FromArgMatches};
 use thiserror::Error;
 
-use crate::components::{Component, LinkStyle};
+use crate::components::{Component, ComponentKind, LinkStyle};
 use crate::output::OutputStyle;
 use crate::service;
 
@@ -27,7 +27,7 @@ pub struct InstallArgs {
         value_delimiter = ',',
         num_args = 1..
     )]
-    components: Vec<Component>,
+    components: Vec<ComponentKind>,
 
     /// Replace an existing installed binary or component symlink.
     #[arg(short = 'O', long = "override")]
@@ -130,7 +130,7 @@ pub fn run(args: InstallArgs, style: OutputStyle) -> Result<()> {
     style.installed(&destination);
 
     for component in &components {
-        let name = link_name(*component, args.style);
+        let name = component.link_name(args.style);
         let path = folder.join(&name);
         if fs::symlink_metadata(&path).is_ok() {
             if args.override_existing {
@@ -174,9 +174,12 @@ fn validate_folder(folder: &Path) -> Result<PathBuf> {
     }
 }
 
-fn selected_components(requested: &[Component]) -> Vec<Component> {
+fn selected_components(requested: &[ComponentKind]) -> Vec<&'static dyn Component> {
     if requested.is_empty() {
-        return Component::DEFAULT.to_vec();
+        return ComponentKind::DEFAULT
+            .iter()
+            .map(|component| component.instance())
+            .collect();
     }
 
     let mut selected = Vec::new();
@@ -185,11 +188,7 @@ fn selected_components(requested: &[Component]) -> Vec<Component> {
             selected.push(*component);
         }
     }
-    selected
-}
-
-fn link_name(component: Component, style: LinkStyle) -> String {
-    component.link_name(style)
+    selected.into_iter().map(ComponentKind::instance).collect()
 }
 
 fn preflight_binary(source: &Path, destination: &Path, override_existing: bool) -> Result<()> {
@@ -228,7 +227,7 @@ fn preflight_binary(source: &Path, destination: &Path, override_existing: bool) 
 
 fn preflight_symlinks(
     folder: &Path,
-    components: &[Component],
+    components: &[&'static dyn Component],
     style: LinkStyle,
     override_existing: bool,
 ) -> Result<()> {
@@ -237,7 +236,7 @@ fn preflight_symlinks(
     }
 
     for component in components {
-        let path = folder.join(link_name(*component, style));
+        let path = folder.join(component.link_name(style));
         match fs::symlink_metadata(&path) {
             Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
                 return Err(InstallError::SymlinkIsDirectory { path }.into());
