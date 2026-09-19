@@ -6,8 +6,21 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use anyhow::{Context, Result};
 use thiserror::Error;
 
+use crate::components::{Component, ServiceDescriptor};
+
 const LOCALIZED_SUFFIX: &str = ".localized";
 static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+pub(crate) const LOCALIZE_SERVICE: ServiceDescriptor = ServiceDescriptor {
+    component: Component::Localize,
+    bundle_name: "KakoHelpersLocalize.service",
+    bundle_identifier: "com.kako.helpers.localize-service",
+    host_executable_name: "KakoHelpersLocalizeService",
+    localize_message: "localizeFolder",
+    localize_menu_title: "Localize Folder",
+    remove_message: "removeLocalizedNames",
+    remove_menu_title: "Remove Localized Names",
+};
 
 /// Top-level failure returned by the localized-name API.
 ///

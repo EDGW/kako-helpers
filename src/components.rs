@@ -25,7 +25,7 @@ impl Component {
 
     pub fn service_descriptor(self) -> Option<&'static ServiceDescriptor> {
         match self {
-            Self::Localize => Some(&LOCALIZE_SERVICE),
+            Self::Localize => Some(&crate::tools::localizer::LOCALIZE_SERVICE),
             Self::Install => None,
         }
     }
@@ -48,14 +48,3 @@ pub struct ServiceDescriptor {
     pub remove_message: &'static str,
     pub remove_menu_title: &'static str,
 }
-
-const LOCALIZE_SERVICE: ServiceDescriptor = ServiceDescriptor {
-    component: Component::Localize,
-    bundle_name: "KakoHelpersLocalize.service",
-    bundle_identifier: "com.kako.helpers.localize-service",
-    host_executable_name: "KakoHelpersLocalizeService",
-    localize_message: "localizeFolder",
-    localize_menu_title: "Localize Folder",
-    remove_message: "removeLocalizedNames",
-    remove_menu_title: "Remove Localized Names",
-};
